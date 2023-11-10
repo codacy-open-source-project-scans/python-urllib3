@@ -117,6 +117,9 @@ def downstream_requests(session: nox.Session) -> None:
     session.install(".[socks]", silent=False)
     session.install("-r", "requirements-dev.txt", silent=False)
 
+    # Workaround until https://github.com/psf/httpbin/pull/29 gets released
+    session.install("flask<3", "werkzeug<3", silent=False)
+
     session.cd(root)
     session.install(".", silent=False)
     session.cd(f"{tmp_dir}/requests")
@@ -131,7 +134,7 @@ def format(session: nox.Session) -> None:
     lint(session)
 
 
-@nox.session
+@nox.session(python="3.12")
 def lint(session: nox.Session) -> None:
     session.install("pre-commit")
     session.run("pre-commit", "run", "--all-files")
@@ -139,7 +142,7 @@ def lint(session: nox.Session) -> None:
     mypy(session)
 
 
-@nox.session(python="3.8")
+@nox.session(python="3.12")
 def mypy(session: nox.Session) -> None:
     """Run mypy."""
     session.install("-r", "mypy-requirements.txt")
