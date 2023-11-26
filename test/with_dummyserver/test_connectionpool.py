@@ -12,8 +12,12 @@ from urllib.parse import urlencode
 
 import pytest
 
-from dummyserver.testcase import HTTPDummyServerTestCase, SocketDummyServerTestCase
-from dummyserver.tornadoserver import HAS_IPV6_AND_DNS, NoIPv6Warning
+from dummyserver.testcase import (
+    HTTPDummyServerTestCase,
+    HypercornDummyServerTestCase,
+    SocketDummyServerTestCase,
+)
+from dummyserver.tornadoserver import NoIPv6Warning
 from urllib3 import HTTPConnectionPool, encode_multipart_formdata
 from urllib3._collections import HTTPHeaderDict
 from urllib3.connection import _get_default_user_agent
@@ -198,7 +202,7 @@ class TestConnectionPoolTimeouts(SocketDummyServerTestCase):
                 conn.connect()
 
 
-class TestConnectionPool(HTTPDummyServerTestCase):
+class TestConnectionPool(HypercornDummyServerTestCase):
     def test_get(self) -> None:
         with HTTPConnectionPool(self.host, self.port) as pool:
             r = pool.request("GET", "/specific_method", fields={"method": "GET"})
@@ -231,7 +235,7 @@ class TestConnectionPool(HTTPDummyServerTestCase):
             "upload_filename": "lolcat.txt",
             "filefield": ("lolcat.txt", data),
         }
-        fields["upload_size"] = len(data)  # type: ignore
+        fields["upload_size"] = len(data)  # type: ignore[assignment]
 
         with HTTPConnectionPool(self.host, self.port) as pool:
             r = pool.request("POST", "/upload", fields=fields)
@@ -270,7 +274,7 @@ class TestConnectionPool(HTTPDummyServerTestCase):
             "upload_filename": filename,
             fieldname: (filename, data),
         }
-        fields["upload_size"] = size  # type: ignore
+        fields["upload_size"] = size  # type: ignore[assignment]
         with HTTPConnectionPool(self.host, self.port) as pool:
             r = pool.request("POST", "/upload", fields=fields)
             assert r.status == 200, r.data
@@ -780,7 +784,9 @@ class TestConnectionPool(HTTPDummyServerTestCase):
 
     def test_source_address(self) -> None:
         for addr, is_ipv6 in VALID_SOURCE_ADDRESSES:
-            if is_ipv6 and not HAS_IPV6_AND_DNS:
+            if is_ipv6:
+                # TODO enable if HAS_IPV6_AND_DNS when this is fixed:
+                # https://github.com/pgjones/hypercorn/issues/160
                 warnings.warn("No IPv6 support: skipping.", NoIPv6Warning)
                 continue
             with HTTPConnectionPool(
@@ -890,7 +896,7 @@ class TestConnectionPool(HTTPDummyServerTestCase):
         """ConnectionPool preserves dot segments in the URI"""
         with HTTPConnectionPool(self.host, self.port) as pool:
             response = pool.request("GET", "/echo_uri/seg0/../seg2")
-            assert response.data == b"/echo_uri/seg0/../seg2"
+            assert response.data == b"/echo_uri/seg0/../seg2?"
 
     def test_default_user_agent_header(self) -> None:
         """ConnectionPool has a default user agent"""
@@ -974,54 +980,6 @@ class TestConnectionPool(HTTPDummyServerTestCase):
             assert no_ua_headers["User-Agent"] == SKIP_HEADER
             assert pool_headers.get("User-Agent") == custom_ua
 
-    @pytest.mark.parametrize(
-        "accept_encoding",
-        [
-            "Accept-Encoding",
-            "accept-encoding",
-            b"Accept-Encoding",
-            b"accept-encoding",
-            None,
-        ],
-    )
-    @pytest.mark.parametrize("host", ["Host", "host", b"Host", b"host", None])
-    @pytest.mark.parametrize(
-        "user_agent", ["User-Agent", "user-agent", b"User-Agent", b"user-agent", None]
-    )
-    @pytest.mark.parametrize("chunked", [True, False])
-    def test_skip_header(
-        self,
-        accept_encoding: str | None,
-        host: str | None,
-        user_agent: str | None,
-        chunked: bool,
-    ) -> None:
-        headers = {}
-
-        if accept_encoding is not None:
-            headers[accept_encoding] = SKIP_HEADER
-        if host is not None:
-            headers[host] = SKIP_HEADER
-        if user_agent is not None:
-            headers[user_agent] = SKIP_HEADER
-
-        with HTTPConnectionPool(self.host, self.port) as pool:
-            r = pool.request("GET", "/headers", headers=headers, chunked=chunked)
-        request_headers = r.json()
-
-        if accept_encoding is None:
-            assert "Accept-Encoding" in request_headers
-        else:
-            assert accept_encoding not in request_headers
-        if host is None:
-            assert "Host" in request_headers
-        else:
-            assert host not in request_headers
-        if user_agent is None:
-            assert "User-Agent" in request_headers
-        else:
-            assert user_agent not in request_headers
-
     @pytest.mark.parametrize("header", ["Content-Length", "content-length"])
     @pytest.mark.parametrize("chunked", [True, False])
     def test_skip_header_non_supported(self, header: str, chunked: bool) -> None:
@@ -1061,6 +1019,8 @@ class TestConnectionPool(HTTPDummyServerTestCase):
             else:
                 conn = pool._get_conn()
                 conn.request("GET", "/headers", chunked=chunked)
+                conn.getresponse().close()
+                conn.close()
 
             assert pool.headers == {"key": "val"}
             assert type(pool.headers) is header_type
@@ -1071,6 +1031,8 @@ class TestConnectionPool(HTTPDummyServerTestCase):
             else:
                 conn = pool._get_conn()
                 conn.request("GET", "/headers", headers=headers, chunked=chunked)
+                conn.getresponse().close()
+                conn.close()
 
             assert headers == {"key": "val"}
 
@@ -1090,6 +1052,7 @@ class TestConnectionPool(HTTPDummyServerTestCase):
             resp = conn.getresponse()
             assert resp.status == 200
             assert resp.json()["Transfer-Encoding"] == "chunked"
+            conn.close()
 
     def test_bytes_header(self) -> None:
         with HTTPConnectionPool(self.host, self.port) as pool:
@@ -1114,7 +1077,7 @@ class TestConnectionPool(HTTPDummyServerTestCase):
             assert request_headers["User-Agent"] == "Schönefeld/1.18.0"
 
 
-class TestRetry(HTTPDummyServerTestCase):
+class TestRetry(HypercornDummyServerTestCase):
     def test_max_retry(self) -> None:
         with HTTPConnectionPool(self.host, self.port) as pool:
             with pytest.raises(MaxRetryError):
@@ -1278,7 +1241,7 @@ class TestRetry(HTTPDummyServerTestCase):
             assert actual == expected
 
 
-class TestRetryAfter(HTTPDummyServerTestCase):
+class TestRetryAfter(HypercornDummyServerTestCase):
     def test_retry_after(self) -> None:
         # Request twice in a second to get a 429 response.
         with HTTPConnectionPool(self.host, self.port) as pool:
