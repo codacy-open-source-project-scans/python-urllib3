@@ -27,6 +27,22 @@ async def index() -> ResponseTypes:
     return await make_response("Dummy server!")
 
 
+@hypercorn_app.route("/alpn_protocol")
+async def alpn_protocol() -> ResponseTypes:
+    """Return the requester's certificate."""
+    alpn_protocol = request.scope["extensions"]["tls"]["alpn_protocol"]
+    return await make_response(alpn_protocol)
+
+
+@hypercorn_app.route("/certificate")
+async def certificate() -> ResponseTypes:
+    """Return the requester's certificate."""
+    print("scope", request.scope)
+    subject = request.scope["extensions"]["tls"]["client_cert_name"]
+    subject_as_dict = dict(part.split("=") for part in subject.split(", "))
+    return await make_response(subject_as_dict)
+
+
 @hypercorn_app.route("/specific_method", methods=["GET", "POST", "PUT"])
 async def specific_method() -> ResponseTypes:
     "Confirm that the request matches the desired method type"
@@ -101,7 +117,7 @@ async def keepalive() -> ResponseTypes:
     return await make_response("Keeping alive", 200, headers)
 
 
-@hypercorn_app.route("/echo", methods=["GET", "POST"])
+@hypercorn_app.route("/echo", methods=["GET", "POST", "PUT"])
 async def echo() -> ResponseTypes:
     "Echo back the params"
     if request.method == "GET":
@@ -192,7 +208,7 @@ async def encodingrequest() -> ResponseTypes:
     return await make_response(data, 200, headers)
 
 
-@hypercorn_app.route("/redirect", methods=["GET", "POST"])
+@hypercorn_app.route("/redirect", methods=["GET", "POST", "PUT"])
 async def redirect() -> ResponseTypes:
     "Perform a redirect to ``target``"
     values = await request.values
@@ -248,7 +264,7 @@ async def source_address() -> ResponseTypes:
     return await make_response(request.remote_addr)
 
 
-@hypercorn_app.route("/successful_retry")
+@hypercorn_app.route("/successful_retry", methods=["GET", "PUT"])
 async def successful_retry() -> ResponseTypes:
     """First return an error and then success
 
