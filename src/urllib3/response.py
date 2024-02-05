@@ -19,14 +19,14 @@ if typing.TYPE_CHECKING:
 
 try:
     try:
-        import brotlicffi as brotli  # type: ignore[import]
+        import brotlicffi as brotli  # type: ignore[import-not-found]
     except ImportError:
-        import brotli  # type: ignore[import]
+        import brotli  # type: ignore[import-not-found]
 except ImportError:
     brotli = None
 
 try:
-    import zstandard as zstd  # type: ignore[import]
+    import zstandard as zstd  # type: ignore[import-not-found]
 
     # The package 'zstandard' added the 'eof' property starting
     # in v0.18.0 which we require to ensure a complete and
@@ -344,6 +344,7 @@ class BaseHTTPResponse(io.IOBase):
             self.chunked = True
 
         self._decoder: ContentDecoder | None = None
+        self.length_remaining: int | None
 
     def get_redirect_location(self) -> str | None | Literal[False]:
         """
@@ -1099,9 +1100,13 @@ class HTTPResponse(BaseHTTPResponse):
         try:
             self.chunk_left = int(line, 16)
         except ValueError:
-            # Invalid chunked protocol response, abort.
             self.close()
-            raise InvalidChunkLength(self, line) from None
+            if line:
+                # Invalid chunked protocol response, abort.
+                raise InvalidChunkLength(self, line) from None
+            else:
+                # Truncated at start of next chunk
+                raise ProtocolError("Response ended prematurely") from None
 
     def _handle_chunk(self, amt: int | None) -> bytes:
         returned_chunk = None
